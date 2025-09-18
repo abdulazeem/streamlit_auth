@@ -1,5 +1,5 @@
 """
-Authentication utility module for Streamlit app
+Enhanced Authentication utility for Streamlit app
 """
 
 import streamlit as st
@@ -14,13 +14,9 @@ def _load_auth_config(yaml_path: str = "credentials.yaml") -> Optional[dict]:
     try:
         with open(yaml_path) as file:
             return yaml.load(file, Loader=SafeLoader)
-    except FileNotFoundError:
-        st.error(f"❌ Credentials file not found: {yaml_path}")
-    except yaml.YAMLError as e:
-        st.error(f"❌ Invalid YAML format: {e}")
     except Exception as e:
         st.error(f"❌ Failed to load credentials: {e}")
-    return None
+        return None
 
 
 def _create_authenticator(config: dict) -> Optional[stauth.Authenticate]:
@@ -33,19 +29,15 @@ def _create_authenticator(config: dict) -> Optional[stauth.Authenticate]:
             config["cookie"]["expiry_days"],
             config.get("preauthorized"),
         )
-    except KeyError as e:
-        st.error(f"❌ Missing required config key: {e}")
     except Exception as e:
         st.error(f"❌ Failed to initialize authenticator: {e}")
-    return None
+        return None
 
 
 def authenticate(yaml_path: str = "credentials.yaml") -> Tuple[bool, Optional[stauth.Authenticate]]:
     """
-    Main entry: Authenticate user and return authenticator.
-
-    Usage in main app:
-        auth_status, authenticator = authenticate()
+    Force a strict login page.
+    Until the user is authenticated, nothing else will render.
     """
     config = _load_auth_config(yaml_path)
     if not config:
@@ -55,32 +47,48 @@ def authenticate(yaml_path: str = "credentials.yaml") -> Tuple[bool, Optional[st
     if not authenticator:
         st.stop()
 
-    try:
+    # Reserve full page for login only
+    with st.container():
+        st.markdown(
+            """
+            <style>
+                .block-container {padding-top: 5%; max-width: 500px;}
+                header, footer, .stSidebar {visibility: hidden;}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         name, auth_status, username = authenticator.login("Login", "main")
 
-        st.session_state["authentication_status"] = auth_status
-        st.session_state["name"] = name
-        st.session_state["username"] = username
+    # Save state
+    st.session_state["authentication_status"] = auth_status
+    st.session_state["name"] = name
+    st.session_state["username"] = username
 
-        if auth_status is False:
-            st.error("❌ Username/password is incorrect")
-        elif auth_status is None:
-            st.warning("🔐 Please enter your username and password")
-
-        return bool(auth_status), authenticator
-
-    except Exception as e:
-        st.error(f"❌ Authentication error: {e}")
+    # Handle results
+    if auth_status is False:
+        st.error("❌ Incorrect username or password")
         st.stop()
+    elif auth_status is None:
+        st.warning("🔐 Please log in to continue")
+        st.stop()
+
+    # If authenticated, restore sidebar visibility
+    st.markdown(
+        """
+        <style>
+            .stSidebar {visibility: visible;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    return True, authenticator
 
 
 def show_user_info(authenticator: stauth.Authenticate, location: str = "sidebar") -> None:
-    """
-    Display user info + logout button.
-
-    Usage in main app:
-        show_user_info(authenticator)
-    """
+    """Show user info + logout"""
     if st.session_state.get("authentication_status"):
         name = st.session_state.get("name", "User")
 
