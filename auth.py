@@ -1,7 +1,3 @@
-"""
-Enhanced Authentication utility for Streamlit app
-"""
-
 import streamlit as st
 import streamlit_authenticator as stauth
 import yaml
@@ -9,64 +5,43 @@ from yaml.loader import SafeLoader
 from typing import Tuple, Optional
 
 
-def _load_auth_config(yaml_path: str = "credentials.yaml") -> Optional[dict]:
-    """Load authentication configuration from YAML file"""
+def load_auth_config(yaml_path: str = "credentials.yaml") -> Optional[dict]:
+    """Load authentication configuration from YAML"""
     try:
         with open(yaml_path) as file:
             return yaml.load(file, Loader=SafeLoader)
     except Exception as e:
-        st.error(f"❌ Failed to load credentials: {e}")
-        return None
+        st.error(f"Failed to load credentials: {e}")
+        st.stop()  # stop immediately if config can't be loaded
 
 
-def _create_authenticator(config: dict) -> Optional[stauth.Authenticate]:
-    """Create and return authenticator object"""
-    try:
-        return stauth.Authenticate(
-            config["credentials"],
-            config["cookie"]["name"],
-            config["cookie"]["key"],
-            config["cookie"]["expiry_days"],
-            config.get("preauthorized"),
-        )
-    except Exception as e:
-        st.error(f"❌ Failed to initialize authenticator: {e}")
-        return None
+def create_authenticator(config: dict) -> stauth.Authenticate:
+    """Create authenticator instance"""
+    return stauth.Authenticate(
+        config["credentials"],
+        config["cookie"]["name"],
+        config["cookie"]["key"],
+        config["cookie"]["expiry_days"],
+        config.get("preauthorized"),
+    )
 
 
 def authenticate(yaml_path: str = "credentials.yaml") -> Tuple[bool, Optional[stauth.Authenticate]]:
     """
-    Force a strict login page.
-    Until the user is authenticated, nothing else will render.
+    Force login page until authenticated.
+    Entire app execution stops if not logged in.
     """
-    config = _load_auth_config(yaml_path)
-    if not config:
-        st.stop()
+    config = load_auth_config(yaml_path)
+    authenticator = create_authenticator(config)
 
-    authenticator = _create_authenticator(config)
-    if not authenticator:
-        st.stop()
+    name, auth_status, username = authenticator.login("Login", "main")
 
-    # Reserve full page for login only
-    with st.container():
-        st.markdown(
-            """
-            <style>
-                .block-container {padding-top: 5%; max-width: 500px;}
-                header, footer, .stSidebar {visibility: hidden;}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        name, auth_status, username = authenticator.login("Login", "main")
-
-    # Save state
+    # Save session state
     st.session_state["authentication_status"] = auth_status
     st.session_state["name"] = name
     st.session_state["username"] = username
 
-    # Handle results
+    # Gatekeeping logic
     if auth_status is False:
         st.error("❌ Incorrect username or password")
         st.stop()
@@ -74,29 +49,13 @@ def authenticate(yaml_path: str = "credentials.yaml") -> Tuple[bool, Optional[st
         st.warning("🔐 Please log in to continue")
         st.stop()
 
-    # If authenticated, restore sidebar visibility
-    st.markdown(
-        """
-        <style>
-            .stSidebar {visibility: visible;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     return True, authenticator
 
 
-def show_user_info(authenticator: stauth.Authenticate, location: str = "sidebar") -> None:
-    """Show user info + logout"""
+def show_user_info(authenticator: stauth.Authenticate) -> None:
+    """Sidebar user info + logout button"""
     if st.session_state.get("authentication_status"):
-        name = st.session_state.get("name", "User")
-
-        if location == "sidebar":
-            with st.sidebar:
-                st.success(f"👋 Welcome *{name}*")
-                authenticator.logout("🚪 Logout", "sidebar")
-                st.divider()
-        else:
-            st.success(f"👋 Welcome *{name}*")
-            authenticator.logout("🚪 Logout", "main")
+        with st.sidebar:
+            st.success(f"👋 Welcome *{st.session_state.get('name', 'User')}*")
+            authenticator.logout("🚪 Logout", "sidebar")
+            st.divider()
